@@ -107,44 +107,51 @@ namespace InstaCrawler
                 page = TagUrl + target;
             }
 
-            //check for locking error
-            if (!string.IsNullOrWhiteSpace(target))
+            try
             {
-                using (HttpClient client = new HttpClient())
+                //check for locking error
+                if (!string.IsNullOrWhiteSpace(target))
                 {
-                    using (HttpResponseMessage response = await client.GetAsync(page))
+                    using (HttpClient client = new HttpClient())
                     {
-                        using (HttpContent content = response.Content)
+                        using (HttpResponseMessage response = await client.GetAsync(page))
                         {
-                            // ... Read the string.
-                            string result = await content.ReadAsStringAsync();
-
-                            // ... Display the result.
-                            if (result != null)
+                            using (HttpContent content = response.Content)
                             {
-                                //parse for our finders
-                                result = result.Replace("\\n", " ");
-                                result = result.Replace("\n", " ");
+                                // ... Read the string.
+                                string result = await content.ReadAsStringAsync();
 
-                                ExtractTagTargets(ref result);
-                                await ExtractUserTargets(result);
-
-                                //only look for emails on user page, less false positives
-                                if (ReadUserMode)
+                                // ... Display the result.
+                                if (result != null)
                                 {
-                                    await ExtractEmails(result);
-                                }
+                                    //parse for our finders
+                                    result = result.Replace("\\n", " ");
+                                    result = result.Replace("\n", " ");
 
-                                //display update
-                                Console.WriteLine($"[t{t}] UserQueue {(UserQueue.Any() ? UserQueue.Count : 0)} | TagQueue {(TagQueue.Any() ? TagQueue.Count : 0)} || {target}");
+                                    ExtractTagTargets(ref result);
+                                    await ExtractUserTargets(result);
+
+                                    //only look for emails on user page, less false positives
+                                    if (ReadUserMode)
+                                    {
+                                        await ExtractEmails(result);
+                                    }
+
+                                    //display update
+                                    Console.WriteLine($"[t{t}] UserQueue {(UserQueue.Any() ? UserQueue.Count : 0)} | TagQueue {(TagQueue.Any() ? TagQueue.Count : 0)} || {target}");
+                                }
                             }
                         }
                     }
                 }
+                else
+                {
+                    Console.WriteLine("THREAD LOCKING ERROR");
+                }
             }
-            else
+            catch
             {
-                Console.WriteLine("THREAD LOCKING ERROR");
+                Console.WriteLine($"ERROR WITH READING PAGE ON THREAD {t}");
             }
         }
 
