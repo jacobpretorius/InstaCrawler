@@ -13,6 +13,7 @@ namespace InstaCrawler
     class Program
     {
         private static ElasticClient ElasticSearch;
+        private static ElasticClient ElasticSearchTarget;
 
         public static int FoundEmailCounter { get; set; }
         public static string UserUrl { get; } = "https://www.instagram.com/";
@@ -28,11 +29,12 @@ namespace InstaCrawler
 
         static void Main(string[] args)
         {
-            //setup ES connection, change as you see fit
-            var settings = new ConnectionSettings(new Uri("http://localhost:9200"))
-                .DefaultIndex("emailfrominstagram");
-
+            //setup ES connections, change as you see fit
+            var settings = new ConnectionSettings(new Uri("http://localhost:9200")).DefaultIndex("emailfrominstagram");
             ElasticSearch = new ElasticClient(settings);
+
+            settings = new ConnectionSettings(new Uri("http://localhost:9200")).DefaultIndex("emailfrominstagramtargets");
+            ElasticSearchTarget = new ElasticClient(settings);
 
             //lets start with #bnw shall we
             TagQueue.Enqueue("bnw");
@@ -246,7 +248,7 @@ namespace InstaCrawler
                     //check we havent seen them recently
                     try
                     {
-                        var searchResponse = await ElasticSearch.SearchAsync<TargetUser>(s => s
+                        var searchResponse = await ElasticSearchTarget.SearchAsync<TargetUser>(s => s
                             .AllIndices()
                             .AllTypes()
                             .Query(q => q
@@ -260,7 +262,7 @@ namespace InstaCrawler
                         if (searchResponse != null && searchResponse?.Documents?.FirstOrDefault() == null)
                         {
                             //never been found, jay for spam, index
-                            var _index = await ElasticSearch.IndexAsync(new TargetUser
+                            var _index = await ElasticSearchTarget.IndexAsync(new TargetUser
                             {
                                 TargetHandle = user,
                                 LastCrawledAt = DateTime.UtcNow
@@ -277,7 +279,7 @@ namespace InstaCrawler
                             if (res.LastCrawledAt <= DateTime.UtcNow.AddMonths(-3))
                             {
                                 //havent seen you in 3 months, have an index
-                                var _index = await ElasticSearch.IndexAsync(new TargetUser
+                                var _index = await ElasticSearchTarget.IndexAsync(new TargetUser
                                 {
                                     TargetHandle = user,
                                     LastCrawledAt = DateTime.UtcNow
