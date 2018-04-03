@@ -68,16 +68,16 @@ namespace InstaCrawler
 
         static void Work(int t)
         {
-            try
+            while (true)
             {
-                while (true)
+                try
                 {
                     ReadPage(t).Wait();
                 }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine("ERROR, " + ex);
+                catch (Exception ex)
+                {
+                    Console.WriteLine("ERROR, " + ex);
+                }
             }
         }
 
@@ -149,7 +149,7 @@ namespace InstaCrawler
                     Console.WriteLine("THREAD LOCKING ERROR");
                 }
             }
-            catch
+            catch (Exception e)
             {
                 Console.WriteLine($"ERROR WITH READING PAGE ON THREAD {t}");
             }
