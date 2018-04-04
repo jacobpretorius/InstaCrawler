@@ -21,12 +21,7 @@ namespace InstaCrawler
 
         public static Queue<string> TagQueue { get; set; } = new Queue<string>();
         public static Queue<string> UserQueue { get; set; } = new Queue<string>();
-
-        public static bool ReadUserMode { get; set; }
-        //MODES
-        // t - read user accounts
-        // f - read hashtags
-
+        
         static void Main(string[] args)
         {
             //setup ES connections, change as you see fit
@@ -84,13 +79,20 @@ namespace InstaCrawler
         static async Task ReadPage(int t)
         {
             //check if we have any users to scan
-            ReadUserMode = UserQueue.Any();
+            //MODES
+            // t - read user accounts
+            // f - read hashtags
+            var readUserMode = UserQueue.Any();
+
+            //t1 preempts running out of targets
+            if (t == 1 && UserQueue.Any() && UserQueue.Count < 100)
+                readUserMode = false;
 
             string page = "";
             string target = "";
             
             //make the target url and dequeue in a locked state
-            if (ReadUserMode)
+            if (readUserMode)
             {
                 lock (UserQueue)
                 {
@@ -132,13 +134,13 @@ namespace InstaCrawler
                                     await ExtractUserTargets(result);
 
                                     //only look for emails on user page, less false positives
-                                    if (ReadUserMode)
+                                    if (readUserMode)
                                     {
-                                        await ExtractEmails(result);
+                                        await ExtractEmails(result, target);
                                     }
 
                                     //display update
-                                    Console.WriteLine($"[t{t}] UserQueue {(UserQueue.Any() ? UserQueue.Count : 0)} | TagQueue {(TagQueue.Any() ? TagQueue.Count : 0)} || {target}");
+                                    Console.WriteLine($"[t{t}] UserQueue {(UserQueue.Any() ? UserQueue.Count : 0)} | TagQueue {(TagQueue.Any() ? TagQueue.Count : 0)} || {(readUserMode ? "/" : "#")}{target}");
                                 }
                             }
                         }
@@ -156,7 +158,7 @@ namespace InstaCrawler
         }
 
         //get the email from the page content
-        static async Task ExtractEmails(string input)
+        static async Task ExtractEmails(string input, string target)
         {
             Regex emailRegex = new Regex(@"(([\w-]+\.)+[\w-]+|([a-zA-Z]{1}|[\w-]{2,}))@"
                                          + @"((([0-1]?[0-9]{1,2}|25[0-5]|2[0-4][0-9])\.([0-1]?[0-9]{1,2}|25[0-5]|2[0-4][0-9])\."
@@ -195,6 +197,7 @@ namespace InstaCrawler
                             {
                                 Contacted = false,
                                 EmailAddress = foundEmail.ToString(),
+                                Account = target,
                                 EmailedAt = null
                             });
 
