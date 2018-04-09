@@ -12,6 +12,7 @@ e.g. for win10 64:
     dotnet publish -c Release -r win10-x64
 
 ## KNOWN BUGS: 
-- Sometimes it double hits the same target(s) for a while.
+- It wants to go reaaaaly fast (you should see it with 100 threads on a 8 core xeon box), but hits ratelimits in seconds.
+- It used to double-hit sometimes, not sure if it still does after the refactoring.
 
 Do with it what you must.
