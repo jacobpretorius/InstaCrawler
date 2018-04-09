@@ -36,24 +36,38 @@ namespace InstaCrawler
             TagQueue.Enqueue("bnw_society");
             TagQueue.Enqueue("photooftheday");
             TagQueue.Enqueue("instamood");
+            TagQueue.Enqueue("instagood");
+            TagQueue.Enqueue("mood");
+            TagQueue.Enqueue("style");
+            TagQueue.Enqueue("loveit");
+            TagQueue.Enqueue("dayshots");
+            TagQueue.Enqueue("artwork");
+            TagQueue.Enqueue("naturelover");
+            TagQueue.Enqueue("detail");
+            TagQueue.Enqueue("igmasters");
+            TagQueue.Enqueue("igmood");
+            TagQueue.Enqueue("instamood");
+            TagQueue.Enqueue("instatravel");
+            TagQueue.Enqueue("moodstagram");
+            TagQueue.Enqueue("picoftheday");
 
             Console.WriteLine("STARTING...");
             try
             {
-                //start up our 4 threads, with a sleep so that they dont race to be the first
-                Task task1 = Task.Factory.StartNew(() => Work(1));
-                Thread.Sleep(100);
+                //start up threads
+                List<Thread> threads = new List<Thread>();
+                for (int i = 0; i < 4; i++)
+                {
+                    Thread t = new Thread(() => Work(i));
+                    t.Start();
+                    threads.Add(t);
+                }
 
-                Task task2 = Task.Factory.StartNew(() => Work(2));
-                Thread.Sleep(100);
-
-                Task task3 = Task.Factory.StartNew(() => Work(3));
-                Thread.Sleep(100);
-
-                Task task4 = Task.Factory.StartNew(() => Work(4));
-
-                Task.WaitAll(task1, task2, task3, task4);
-                Console.WriteLine("All threads complete");
+                // Await threads
+                foreach (Thread thread in threads)
+                {
+                    thread.Join();
+                }
             }
             catch (Exception ex)
             {
@@ -96,7 +110,7 @@ namespace InstaCrawler
             {
                 lock (UserQueue)
                 {
-                    target = UserQueue.Dequeue();
+                    UserQueue.TryDequeue(out target);
                 }
                 page = UserUrl + target;
             }
@@ -104,7 +118,7 @@ namespace InstaCrawler
             {
                 lock (TagQueue)
                 {
-                    target = TagQueue.Dequeue();
+                    TagQueue.TryDequeue(out target);
                 }
                 page = TagUrl + target;
             }
@@ -120,27 +134,16 @@ namespace InstaCrawler
                         {
                             using (HttpContent content = response.Content)
                             {
-                                // ... Read the string.
+                                // Read the string.
                                 string result = await content.ReadAsStringAsync();
-
-                                // ... Display the result.
+                                
                                 if (result != null)
                                 {
-                                    //parse for our finders
-                                    result = result.Replace("\\n", " ");
-                                    result = result.Replace("\n", " ");
-
-                                    ExtractTagTargets(ref result);
-                                    await ExtractUserTargets(result);
-
-                                    //only look for emails on user page, less false positives
-                                    if (readUserMode)
-                                    {
-                                        await ExtractEmails(result, target);
-                                    }
+                                    await ProcessPage(target, result, readUserMode);
 
                                     //display update
                                     Console.WriteLine($"[t{t}] UserQueue {(UserQueue.Any() ? UserQueue.Count : 0)} | TagQueue {(TagQueue.Any() ? TagQueue.Count : 0)} || {(readUserMode ? "/" : "#")}{target}");
+                                    Thread.Sleep(1500);
                                 }
                             }
                         }
@@ -149,6 +152,7 @@ namespace InstaCrawler
                 else
                 {
                     Console.WriteLine("THREAD LOCKING ERROR");
+                    Thread.Sleep(5000);
                 }
             }
             catch (Exception e)
@@ -157,9 +161,112 @@ namespace InstaCrawler
             }
         }
 
+        //process the page json
+        static async Task ProcessPage(string target, string input, bool readUserMode)
+        {
+            //actually a 404 page
+            if (input.Contains("Sorry, this page isn&#39;t available."))
+                return;
+
+            //rate limited
+            if (input.Contains("Please wait a few minutes before you try again"))
+            {
+                Console.WriteLine("xx ratelimited");
+                Thread.Sleep(10000);
+                return;
+            }
+
+            //check if it has the json feed we latch on to
+            if (!input.Contains("_sharedData = "))
+                return;
+
+            //format the json string
+            var startCut = input.Substring(input.IndexOf("_sharedData = ") + 14);
+            var jsonText = startCut.Substring(0, startCut.IndexOf(";</script>"));
+            
+            dynamic json = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonText);
+            if (json != null)
+            {
+                //searching user page
+                if (readUserMode)
+                {
+                    //look for emails in user disc
+                    try
+                    {
+                        var userBio = json?.entry_data?.ProfilePage[0]?.graphql?.user?.biography;
+                        if (userBio != null)
+                        {
+                            await ExtractEmails((string) userBio, target);
+                            await ExtractUserTargets((string) userBio);
+                            ExtractTagTargets((string) userBio);
+                        }
+                    }
+                    //safe to ignore as it means we cant do anything
+                    catch {}
+
+                    //and all nodes aka uploads
+                    var media = json?.entry_data?.ProfilePage[0]?.graphql?.user?.edge_owner_to_timeline_media?.edges;
+                    if (media != null)
+                    {
+                        foreach (var upload in media)
+                        {
+                            
+                            try
+                            {
+                                var desc = upload?.node?.edge_media_to_caption?.edges[0]?.node?.text;
+                                if (desc != null)
+                                {
+                                    await ExtractEmails((string) desc, target);
+                                    await ExtractUserTargets((string) desc);
+                                    ExtractTagTargets((string) desc);
+                                }
+                            }
+                            //we cant scrape anything if the node (upload) has no caption
+                            catch { }
+                        }
+                    }
+                }
+
+                //searching tag page
+                if (!readUserMode)
+                {
+                    var topPosts = json?.entry_data?.TagPage[0]?.graphql?.hashtag?.edge_hashtag_to_top_posts?.edges;
+                    if (topPosts != null)
+                    {
+                        foreach (var post in topPosts)
+                        {
+                            try
+                            {
+                                var desc = post?.node?.edge_media_to_caption?.edges[0]?.node?.text;
+                                if (desc != null)
+                                {
+                                    await ExtractEmails((string) desc, target);
+                                    await ExtractUserTargets((string) desc);
+
+                                    if (TagQueue != null && TagQueue.Count < 1000)
+                                    {
+                                        ExtractTagTargets((string) desc);
+                                    }
+                                }
+                            }
+                            //same as above, safe to ignore as this happens when no text available to parse
+                            catch {}
+                        }
+                    }
+                }
+            }
+        }
+
         //get the email from the page content
         static async Task ExtractEmails(string input, string target)
         {
+            if (string.IsNullOrWhiteSpace(input))
+                return;
+
+            //parse for our finders
+            input = input.Replace("\\n", " ");
+            input = input.Replace("\n", " ");
+
             Regex emailRegex = new Regex(@"(([\w-]+\.)+[\w-]+|([a-zA-Z]{1}|[\w-]{2,}))@"
                                          + @"((([0-1]?[0-9]{1,2}|25[0-5]|2[0-4][0-9])\.([0-1]?[0-9]{1,2}|25[0-5]|2[0-4][0-9])\."
                                          + @"([0-1]?[0-9]{1,2}|25[0-5]|2[0-4][0-9])\.([0-1]?[0-9]{1,2}|25[0-5]|2[0-4][0-9])){1}|"
@@ -173,8 +280,7 @@ namespace InstaCrawler
 
                 //check for some approved domains
                 if (email.EndsWith(".com") || email.EndsWith(".net") || email.EndsWith(".org") ||
-                    email.EndsWith(".me") || email.EndsWith(".info") || email.EndsWith(".co")
-                    )
+                    email.EndsWith(".me") || email.EndsWith(".info") || email.EndsWith(".co"))
                 {
                     //check if we have this email in ES already
                     try
@@ -214,12 +320,16 @@ namespace InstaCrawler
         }
 
         //find tags to look at
-        static void ExtractTagTargets(ref string input)
+        static void ExtractTagTargets(string input)
         {
+            //parse for our finders
+            input = input.Replace("\\n", " ");
+            input = input.Replace("\n", " ");
+
             Regex tagRegex = new Regex(@"(?<=#)\w+", RegexOptions.IgnoreCase);
             MatchCollection tagMatches = tagRegex.Matches(input);
 
-            if (TagQueue.Count < 20)
+            if (TagQueue != null && TagQueue.Count < 1000)
             {
                 foreach (Match foundTag in tagMatches)
                 {
@@ -237,12 +347,16 @@ namespace InstaCrawler
         //find users to look at
         static async Task ExtractUserTargets(string input)
         {
-            Regex userRegex = new Regex(@"(?<=@)\w+", RegexOptions.IgnoreCase);
-            MatchCollection userMatches = userRegex.Matches(input);
-
-            //dont care for more than 999 in the queue
-            if (UserQueue.Count < 999)
+            //dont care for more than 5000 in the queue
+            if (UserQueue.Count < 5000)
             {
+                //parse for our finders
+                input = input.Replace("\\n", " ");
+                input = input.Replace("\n", " ");
+
+                Regex userRegex = new Regex(@"(?<=@)\w+", RegexOptions.IgnoreCase);
+                MatchCollection userMatches = userRegex.Matches(input);
+
                 foreach (Match foundUser in userMatches)
                 {
                     var user = foundUser.ToString().ToLower();
